@@ -575,8 +575,40 @@ def update_booking_status(booking_id):
 @app.route("/admin")
 @login_required
 def admin_index():
+    q = request.args.get("q", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.args.get("per_page", 10))
+    except (TypeError, ValueError):
+        per_page = 10
+    per_page = min(max(per_page, 5), 50)
+    offset = (page - 1) * per_page
+
     conn = get_db()
-    rows = conn.execute("SELECT * FROM properti ORDER BY nama_rumah ASC").fetchall()
+    params = []
+    where_clause = ""
+    if q:
+        like = f"%{q}%"
+        where_clause = "WHERE nama_rumah LIKE ? OR alamat LIKE ? OR kota LIKE ?"
+        params.extend([like, like, like])
+
+    total_row = conn.execute(
+        f"SELECT COUNT(*) AS c FROM properti {where_clause}", params
+    ).fetchone()
+    total = total_row["c"] if total_row else 0
+
+    rows = conn.execute(
+        f"""
+        SELECT * FROM properti
+        {where_clause}
+        ORDER BY nama_rumah ASC
+        LIMIT ? OFFSET ?
+        """,
+        [*params, per_page, offset],
+    ).fetchall()
     data = []
     for row in rows:
         img_rows = conn.execute(
@@ -603,11 +635,24 @@ def admin_index():
         if status in booking_counts:
             booking_counts[status] = r["c"]
     conn.close()
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    pagination = {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": total_pages,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": page - 1,
+        "next_page": page + 1,
+    }
     return render_template(
         "admin_index.html",
         properti_list=data,
         top_type=top_type,
         booking_counts=booking_counts,
+        q=q,
+        pagination=pagination,
     )
 
 
